@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Build
 import io.legado.app.constant.AppConst
-import io.legado.app.model.ReadAloud
 import io.legado.app.utils.FileUtils
 import io.legado.app.utils.getFile
 import io.legado.app.utils.longToastOnUi
@@ -46,7 +45,6 @@ class CrashHandler(val context: Context) : Thread.UncaughtExceptionHandler {
      * uncaughtException 回调函数
      */
     override fun uncaughtException(thread: Thread, ex: Throwable) {
-        ReadAloud.stop(context)
         handleException(ex)
         mDefaultHandler?.uncaughtException(thread, ex)
     }

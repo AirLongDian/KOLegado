@@ -276,12 +276,7 @@ object CacheBook {
             content: String,
             resetPageOffset: Boolean = false
         ) {
-            if (ReadBook.book?.bookUrl == book.bookUrl) {
-                ReadBook.contentLoadFinish(
-                    book, chapter, content,
-                    resetPageOffset = resetPageOffset
-                )
-            }
+            // WebBook has saved the original cache. KO opens that path directly.
         }
 
     }

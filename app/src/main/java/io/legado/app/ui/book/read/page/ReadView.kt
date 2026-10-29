@@ -7,12 +7,15 @@ import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
 import android.os.Build
+import android.os.SystemClock
 import android.util.AttributeSet
+import android.util.Log
 import android.view.MotionEvent
 import android.view.ViewConfiguration
 import android.view.WindowInsets
 import android.widget.FrameLayout
 import io.legado.app.help.AppConfig
+import io.legado.app.BuildConfig
 import io.legado.app.help.ReadBookConfig
 import io.legado.app.lib.theme.accentColor
 import io.legado.app.model.ReadAloud
@@ -50,6 +53,8 @@ class ReadView(context: Context, attrs: AttributeSet) :
     val defaultAnimationSpeed = 300
     private var pressDown = false
     private var isMove = false
+    private var pageTurnStart = 0L
+    private var lastTurnDirection = PageDirection.NEXT
 
     //起始点
     var startX: Float = 0f
@@ -126,7 +131,21 @@ class ReadView(context: Context, attrs: AttributeSet) :
     }
 
     override fun dispatchDraw(canvas: Canvas) {
-        super.dispatchDraw(canvas)
+        val drawStarted = SystemClock.uptimeMillis()
+        if (BuildConfig.DEBUG && pageTurnStart != 0L) {
+            Log.d("PagePerf", "input-to-draw-start=${drawStarted - pageTurnStart}ms")
+        }
+        if (pageDelegate is NoAnimPageDelegate && !callBack.isAutoPage && !isScroll) {
+            // The next page is stacked behind the current page. Drawing it is wasted
+            // work on e-ink devices when there is no page-turn animation.
+            drawChild(canvas, curPage, drawingTime)
+        } else {
+            super.dispatchDraw(canvas)
+        }
+        if (BuildConfig.DEBUG && pageTurnStart != 0L) {
+            Log.d("PagePerf", "draw-duration=${SystemClock.uptimeMillis() - drawStarted}ms")
+            pageTurnStart = 0L
+        }
         pageDelegate?.onDraw(canvas)
         if (!isInEditMode && callBack.isAutoPage && !isScroll) {
             // TODO 自动翻页
@@ -406,6 +425,14 @@ class ReadView(context: Context, attrs: AttributeSet) :
 
     private fun click(action: Int) {
         when (action) {
+            1, 3 -> lastTurnDirection = PageDirection.NEXT
+            2, 4 -> lastTurnDirection = PageDirection.PREV
+        }
+        if (BuildConfig.DEBUG && pageDelegate is NoAnimPageDelegate && (action == 1 || action == 2)) {
+            pageTurnStart = SystemClock.uptimeMillis()
+            Log.d("PagePerf", "turn action=$action")
+        }
+        when (action) {
             0 -> callBack.showActionMenu()
             1 -> pageDelegate?.nextPageByAnim(defaultAnimationSpeed)
             2 -> pageDelegate?.prevPageByAnim(defaultAnimationSpeed)
@@ -451,6 +478,7 @@ class ReadView(context: Context, attrs: AttributeSet) :
     }
 
     fun onDestroy() {
+        ContentTextView.clearPreparedPage()
         pageDelegate?.onDestroy()
         curPage.cancelSelect()
     }
@@ -490,6 +518,7 @@ class ReadView(context: Context, attrs: AttributeSet) :
     }
 
     override fun upContent(relativePosition: Int, resetPageOffset: Boolean) {
+        val started = SystemClock.uptimeMillis()
         curPage.setContentDescription(pageFactory.curPage.text)
         if (isScroll && !callBack.isAutoPage) {
             curPage.setContent(pageFactory.curPage, resetPageOffset)
@@ -505,10 +534,21 @@ class ReadView(context: Context, attrs: AttributeSet) :
                 }
             }
         }
+        if (BuildConfig.DEBUG && pageTurnStart != 0L) {
+            Log.d("PagePerf", "upContent=${SystemClock.uptimeMillis() - started}ms relative=$relativePosition")
+        }
+        if (pageDelegate is NoAnimPageDelegate && !isScroll && !callBack.isAutoPage) {
+            if (lastTurnDirection == PageDirection.PREV) {
+                prevPage.prepareAdjacentPageText()
+            } else {
+                nextPage.prepareAdjacentPageText()
+            }
+        }
         callBack.screenOffTimerStart()
     }
 
     fun upStyle() {
+        ContentTextView.clearPreparedPage()
         ChapterProvider.upStyle()
         curPage.upStyle()
         prevPage.upStyle()

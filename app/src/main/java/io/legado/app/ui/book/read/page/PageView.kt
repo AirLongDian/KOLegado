@@ -215,6 +215,10 @@ class PageView(context: Context) : FrameLayout(context) {
         binding.contentTextView.setContent(textPage)
     }
 
+    fun prepareAdjacentPageText() {
+        binding.contentTextView.prepareAdjacentPage()
+    }
+
     fun setContentDescription(content: String) {
         binding.contentTextView.contentDescription = content
     }

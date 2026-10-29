@@ -8,7 +8,6 @@ import androidx.annotation.Keep
 import io.legado.app.R
 import io.legado.app.constant.PreferKey
 import io.legado.app.help.coroutine.Coroutine
-import io.legado.app.ui.book.read.page.provider.ChapterProvider
 import io.legado.app.utils.*
 import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.withContext
@@ -473,7 +472,6 @@ object ReadBookConfig {
                 AppConfig.isNightTheme -> textColorNight = "#${color.hexString}"
                 else -> textColor = "#${color.hexString}"
             }
-            ChapterProvider.upStyle()
         }
 
         fun curTextColor(): Int {

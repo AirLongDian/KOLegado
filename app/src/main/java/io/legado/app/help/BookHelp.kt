@@ -29,6 +29,10 @@ object BookHelp {
     private val downloadDir: File = appCtx.externalFiles
     private val downloadImages = CopyOnWriteArraySet<String>()
 
+    /** Existing UTF-8 chapter cache: no export and no duplicate chapter file. */
+    fun getContentFile(book: Book, chapter: BookChapter): File =
+        downloadDir.getFile(cacheFolderName, book.getFolderName(), chapter.getFileName())
+
     fun clearCache() {
         FileUtils.deleteFile(
             FileUtils.getPath(downloadDir, cacheFolderName)

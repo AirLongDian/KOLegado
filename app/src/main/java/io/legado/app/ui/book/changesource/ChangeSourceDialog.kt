@@ -1,5 +1,6 @@
 package io.legado.app.ui.book.changesource
 
+import android.content.DialogInterface
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
@@ -199,6 +200,11 @@ class ChangeSourceDialog() : BaseDialogFragment(R.layout.dialog_change_source),
         dismissAllowingStateLoss()
     }
 
+    override fun onDismiss(dialog: DialogInterface) {
+        callBack?.onChangeSourceDialogClosed()
+        super.onDismiss(dialog)
+    }
+
     override val bookUrl: String?
         get() = callBack?.oldBook?.bookUrl
 
@@ -280,6 +286,7 @@ class ChangeSourceDialog() : BaseDialogFragment(R.layout.dialog_change_source),
     interface CallBack {
         val oldBook: Book?
         fun changeTo(source: BookSource, book: Book)
+        fun onChangeSourceDialogClosed() = Unit
     }
 
 }

@@ -5,6 +5,9 @@ apply plugin: 'kotlin-kapt'
 apply plugin: 'de.timfreiheit.resourceplaceholders'
 apply from: 'download.gradle'
 
+// Isolate replacement build outputs from the existing, usable 阅读D APK.
+buildDir = file("$rootDir/work/build-ko")
+
 static def releaseTime() {
     return new Date().format("yy.MMddHH", TimeZone.getTimeZone("GMT+8"))
 }
@@ -12,6 +15,17 @@ static def releaseTime() {
 def name = "legado"
 def version = "3." + releaseTime()
 def gitCommits = Integer.parseInt('git rev-list --count HEAD'.execute([], project.rootDir).text.trim())
+
+// Kotlin 1.5's Android integration ignores source-directory excludes. Use a
+// filtered build-only tree; leave the user's previous reader experiments intact.
+def koSources = tasks.register('prepareKoSources', Sync) {
+    from('src/main/java') {
+        exclude 'io/legado/app/ui/book/read/**'
+        exclude 'io/legado/app/model/ReadAloud.kt'
+        exclude 'io/legado/app/service/*ReadAloudService.kt'
+    }
+    into "$buildDir/generated/ko-sources"
+}
 
 android {
     compileSdkVersion 30
@@ -40,6 +54,7 @@ android {
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         project.ext.set("archivesBaseName", name + "_" + version)
         multiDexEnabled true
+        ndk { abiFilters 'armeabi-v7a' }
 
         javaCompileOptions {
             annotationProcessorOptions {
@@ -70,7 +85,8 @@ android {
             if (project.hasProperty("RELEASE_STORE_FILE")) {
                 signingConfig signingConfigs.myConfig
             }
-            applicationIdSuffix '.debug'
+            // Never replace the user's working 阅读D installation during integration tests.
+            applicationIdSuffix '.kotest'
             versionNameSuffix 'debug'
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
@@ -78,7 +94,8 @@ android {
         android.applicationVariants.all { variant ->
             variant.outputs.all {
                 def flavor = variant.productFlavors[0].name
-                outputFileName = "${name}_${flavor}_${defaultConfig.versionName}.apk"
+                outputFileName = variant.buildType.name == 'debug' && flavor == 'app'
+                        ? 'K源阅O.apk' : "${name}_${flavor}_${defaultConfig.versionName}.apk"
             }
         }
     }
@@ -103,6 +120,7 @@ android {
     }
 
     sourceSets {
+        main.java.setSrcDirs(["$buildDir/generated/ko-sources"])
         // Adds exported schema location as test app assets.
         androidTest.assets.srcDirs += files("$projectDir/schemas".toString())
     }
@@ -120,6 +138,13 @@ kapt {
         arg("room.schemaLocation", "$projectDir/schemas")
     }
 }
+
+afterEvaluate {
+    // Kotlin adds its Android default directories late; replace them after that hook.
+    android.sourceSets.getByName('main').kotlin.setSrcDirs(["$buildDir/generated/ko-sources"])
+    extensions.getByName('kotlin').sourceSets.getByName('main').kotlin.setSrcDirs(["$buildDir/generated/ko-sources"])
+}
+tasks.named('preBuild').configure { dependsOn koSources }
 
 dependencies {
     coreLibraryDesugaring('com.android.tools:desugar_jdk_libs:1.1.5')

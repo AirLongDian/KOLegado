@@ -155,9 +155,11 @@
         <!-- 阅读界面 -->
         <activity
             android:name=".ui.book.read.ReadBookActivity"
+            android:theme="@android:style/Theme.Holo.Light.NoActionBar.Fullscreen"
             android:configChanges="locale|keyboardHidden|orientation|screenSize|smallestScreenSize|screenLayout"
             android:exported="true"
             android:launchMode="singleTask">
+            <meta-data android:name="android.app.lib_name" android:value="luajit-launcher" />
             <intent-filter>
                 <action android:name="com.samsung.android.support.REMOTE_ACTION" />
             </intent-filter>
@@ -166,6 +168,9 @@
                 android:name="com.samsung.android.support.REMOTE_ACTION"
                 android:resource="@xml/spen_remote_actions" />
         </activity>
+        <activity
+            android:name=".ko.KoChangeSourceActivity"
+            android:theme="@style/AppTheme.Transparent" />
         <!-- 书籍详情页 -->
         <activity
             android:name=".ui.book.info.BookInfoActivity"
@@ -408,8 +413,6 @@
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
         </service>
-        <service android:name=".service.TTSReadAloudService" />
-        <service android:name=".service.HttpReadAloudService" />
         <service android:name=".service.AudioPlayService" />
         <service android:name=".service.DownloadService" />
 

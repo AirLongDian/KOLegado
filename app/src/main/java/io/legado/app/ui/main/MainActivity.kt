@@ -25,7 +25,6 @@ import io.legado.app.help.LocalConfig
 import io.legado.app.help.storage.Backup
 import io.legado.app.lib.theme.elevation
 import io.legado.app.lib.theme.primaryColor
-import io.legado.app.service.BaseReadAloudService
 import io.legado.app.ui.main.bookshelf.BaseBookshelfFragment
 import io.legado.app.ui.main.bookshelf.style1.BookshelfFragment1
 import io.legado.app.ui.main.bookshelf.style2.BookshelfFragment2
@@ -146,11 +145,7 @@ class MainActivity : VMBaseActivity<ActivityMainBinding, MainViewModel>(),
                         toastOnUi(R.string.double_click_exit)
                         exitTime = System.currentTimeMillis()
                     } else {
-                        if (BaseReadAloudService.pause) {
-                            finish()
-                        } else {
-                            moveTaskToBack(true)
-                        }
+                        finish()
                     }
                     return true
                 }

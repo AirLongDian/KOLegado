@@ -13,3 +13,5 @@ node_modules/
 /app/google
 /app/gradle.properties
 package-lock.json
+# Host-side SDK downloads, donor extraction and build staging.
+/work/

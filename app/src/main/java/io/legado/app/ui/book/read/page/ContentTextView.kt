@@ -1,11 +1,15 @@
 package io.legado.app.ui.book.read.page
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
+import android.os.SystemClock
 import android.util.AttributeSet
+import android.util.Log
 import android.view.View
+import io.legado.app.BuildConfig
 import io.legado.app.R
 import io.legado.app.constant.PreferKey
 import io.legado.app.data.entities.Bookmark
@@ -26,6 +30,21 @@ import kotlin.math.min
  * 阅读内容界面
  */
 class ContentTextView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
+    companion object {
+        // One page is enough for the common forward-reading path (~6 MB at
+        // 1072x1448). Keep it separate from the mutable PageView hierarchy.
+        private var preparedPage: TextPage? = null
+        private var preparedBitmap: Bitmap? = null
+        private var cacheGeneration = 0
+
+        fun clearPreparedPage() {
+            cacheGeneration++
+            preparedPage = null
+            preparedBitmap?.recycle()
+            preparedBitmap = null
+        }
+    }
+
     var selectAble = context.getPrefBoolean(PreferKey.textSelectAble, true)
     var upView: ((TextPage) -> Unit)? = null
     private val selectedPaint by lazy {
@@ -38,6 +57,10 @@ class ContentTextView(context: Context, attrs: AttributeSet?) : View(context, at
     private val visibleRect = RectF()
     private val selectStart = arrayOf(0, 0, 0)
     private val selectEnd = arrayOf(0, 0, 0)
+    private var glyphChars = CharArray(0)
+    private var glyphPositions = FloatArray(0)
+    private var prepareTask: Runnable? = null
+    private var renderingBitmap: Bitmap? = null
     var textPage: TextPage = TextPage()
         private set
 
@@ -50,8 +73,82 @@ class ContentTextView(context: Context, attrs: AttributeSet?) : View(context, at
     }
 
     fun setContent(textPage: TextPage) {
+        cancelPrepare()
         this.textPage = textPage
         invalidate()
+    }
+
+    private fun cancelPrepare() {
+        prepareTask?.let { removeCallbacks(it) }
+        prepareTask = null
+        renderingBitmap?.recycle()
+        renderingBitmap = null
+    }
+
+    fun prepareAdjacentPage() {
+        cancelPrepare()
+        val page = textPage
+        val generation = cacheGeneration
+        val task = Runnable {
+            prepareTask = null
+            if (!isAttachedToWindow || width <= 0 || height <= 0 ||
+                textPage !== page || callBack.isScroll || !isPlainText(page) ||
+                generation != cacheGeneration) return@Runnable
+            if (preparedPage === page && preparedBitmap?.width == width &&
+                preparedBitmap?.height == height) return@Runnable
+            try {
+                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                renderingBitmap = bitmap
+                prepareLine(page, bitmap, 0, SystemClock.uptimeMillis(), generation)
+            } catch (e: OutOfMemoryError) {
+                cancelPrepare()
+                if (BuildConfig.DEBUG) Log.w("PagePerf", "prepare-next skipped: out of memory")
+            }
+        }
+        prepareTask = task
+        // Let the current frame reach the display before preparing the next.
+        postDelayed(task, 150L)
+    }
+
+    private fun prepareLine(
+        page: TextPage, bitmap: Bitmap, lineIndex: Int, started: Long, generation: Int
+    ) {
+        if (!isAttachedToWindow || textPage !== page || callBack.isScroll ||
+            generation != cacheGeneration || bitmap.width != width || bitmap.height != height) {
+            cancelPrepare()
+            return
+        }
+        if (lineIndex < page.textLines.size) {
+            val pageCanvas = Canvas(bitmap)
+            pageCanvas.clipRect(visibleRect)
+            draw(pageCanvas, page.textLines[lineIndex], relativeOffset(0))
+        }
+        if (lineIndex + 1 < page.textLines.size) {
+            // A whole page can take 200–500 ms on this single-core Kindle.
+            // Yield between lines so a tap never waits for the entire page.
+            val task = Runnable {
+                prepareTask = null
+                prepareLine(page, bitmap, lineIndex + 1, started, generation)
+            }
+            prepareTask = task
+            postDelayed(task, 8L)
+        } else {
+            if (isPlainText(page)) {
+                preparedBitmap?.recycle()
+                preparedPage = page
+                preparedBitmap = bitmap
+                renderingBitmap = null
+                if (BuildConfig.DEBUG) {
+                    Log.d("PagePerf", "prepare-adjacent=${SystemClock.uptimeMillis() - started}ms page=${page.index}")
+                }
+            } else {
+                cancelPrepare()
+            }
+        }
+    }
+
+    private fun isPlainText(page: TextPage): Boolean = page.textLines.none { line ->
+        line.isReadAloud || line.textChars.any { it.isImage || it.selected }
     }
 
     fun upVisibleRect() {
@@ -71,9 +168,20 @@ class ContentTextView(context: Context, attrs: AttributeSet?) : View(context, at
     }
 
     override fun onDraw(canvas: Canvas) {
+        val started = SystemClock.uptimeMillis()
         super.onDraw(canvas)
         canvas.clipRect(visibleRect)
-        drawPage(canvas)
+        val bitmap = preparedBitmap
+        if (!callBack.isScroll && bitmap != null && preparedPage === textPage &&
+            bitmap.width == width && bitmap.height == height && isPlainText(textPage)) {
+            canvas.drawBitmap(bitmap, 0f, 0f, null)
+            if (BuildConfig.DEBUG) Log.d("PagePerf", "prepared-hit page=${textPage.index}")
+        } else {
+            drawPage(canvas)
+        }
+        if (BuildConfig.DEBUG) {
+            Log.d("PagePerf", "text-draw=${SystemClock.uptimeMillis() - started}ms page=${textPage.index} lines=${textPage.lineSize}")
+        }
     }
 
     /**
@@ -141,15 +249,36 @@ class ContentTextView(context: Context, attrs: AttributeSet?) : View(context, at
         }
         textPaint.color =
             if (isReadAloud) context.accentColor else ReadBookConfig.textColor
+        if (glyphChars.size < textChars.size) {
+            glyphChars = CharArray(textChars.size)
+            glyphPositions = FloatArray(textChars.size * 2)
+        }
+        var glyphCount = 0
+        @Suppress("DEPRECATION")
+        fun flushGlyphs() {
+            if (glyphCount > 0) {
+                canvas.drawPosText(glyphChars, 0, glyphCount, glyphPositions, textPaint)
+                glyphCount = 0
+            }
+        }
         textChars.forEach {
-            if (it.isImage) {
-                drawImage(canvas, it, lineTop, lineBottom, isImageLine)
+            if (!it.isImage && it.charData.length == 1) {
+                glyphChars[glyphCount] = it.charData[0]
+                glyphPositions[glyphCount * 2] = it.start
+                glyphPositions[glyphCount * 2 + 1] = lineBase
+                glyphCount++
             } else {
-                canvas.drawText(it.charData, it.start, lineBase, textPaint)
+                flushGlyphs()
+                if (it.isImage) {
+                    drawImage(canvas, it, lineTop, lineBottom, isImageLine)
+                } else {
+                    canvas.drawText(it.charData, it.start, lineBase, textPaint)
+                }
             }
-            if (it.selected) {
-                canvas.drawRect(it.start, lineTop, it.end, lineBottom, selectedPaint)
-            }
+        }
+        flushGlyphs()
+        textChars.forEach {
+            if (it.selected) canvas.drawRect(it.start, lineTop, it.end, lineBottom, selectedPaint)
         }
     }
 
